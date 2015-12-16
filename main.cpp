@@ -30,10 +30,10 @@ int main() {
     std::cout << mem.size() << '\n';
     Producer<Sep> p{mem};
 
-    size_t n = 10;
+    size_t n = 1025;
     volatile Index back = 0;
     for (size_t i = 0; i < n; i++) {
-        auto e = p.produce(4, back);
+        auto e = p.produce(8, back);
         if (e) {
             std::cout << "#" << i << " " << e.data() << '\n';
             *e.data<uint32_t>() = i;

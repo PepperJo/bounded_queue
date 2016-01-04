@@ -2,14 +2,15 @@
 #define BOUNDED_QUEUE_H
 
 #include <system_error>
+#include <memory>
 
 namespace bounded_queue {
 
 using Index = size_t;
 class Memory {
     private:
-        const size_t size_;
-        void* const mem_;
+        size_t size_;
+        void* mem_;
     public:
         Memory(size_t size);
         ~Memory();
@@ -19,7 +20,7 @@ class Memory {
             return raw + (idx % size());
         }
 
-        void* get() const {
+        void* raw() const {
             return mem_;
         }
 
@@ -71,16 +72,16 @@ class Element {
 template<class Separator>
 class Producer {
     private:
-        Memory mem_;
+        std::shared_ptr<Memory> mem_;
         Index front_;
         size_t left(Index back) const {
             if (front_ < back) {
                 return back - front_;
             }
-            return mem_.size() - (front_ - back);
+            return mem_->size() - (front_ - back);
         }
     public:
-        Producer(const Memory& mem) : mem_{mem}, front_{0} {}
+        Producer(std::shared_ptr<Memory> mem) : mem_{mem}, front_{0} {}
 
         Element<Separator> produce(size_t size, Index back) {
             const size_t hdr_data_size = sizeof(Separator) + size;
@@ -94,7 +95,7 @@ class Producer {
              *   |H|+++|F|
              * ------------------------
              */
-            auto hdr = reinterpret_cast<Separator*>(mem_.at(front_));
+            auto hdr = reinterpret_cast<Separator*>(mem_->at(front_));
             hdr->header(size);
             /*      front_
              *         |
@@ -103,7 +104,7 @@ class Producer {
              * ------------------------
              */
             front_ += hdr_data_size;
-            reinterpret_cast<Separator*>(mem_.at(front_))->footer();
+            reinterpret_cast<Separator*>(mem_->at(front_))->footer();
             /*              front_
              *                |
              * ------------------------
@@ -117,13 +118,13 @@ class Producer {
 template<class Separator>
 class Consumer {
     private:
-        Memory mem_;
+        std::shared_ptr<Memory> mem_;
         Index back_;
     public:
-        Consumer(const Memory& mem) : mem_{mem}, back_{0} {}
+        Consumer(std::shared_ptr<Memory> mem) : mem_{mem}, back_{0} {}
 
         const Element<Separator> consume() {
-            auto sep = reinterpret_cast<Separator*>(mem_.at(back_));
+            auto sep = reinterpret_cast<Separator*>(mem_->at(back_));
             if (!sep->valid() || sep->is_footer) {
                 /* back_
                  *   |
@@ -149,7 +150,7 @@ class Consumer {
              *  we need to check if there is a valid footer
              *  or header
              */
-            if (!reinterpret_cast<Separator*>(mem_.at(new_back))->valid()) {
+            if (!reinterpret_cast<Separator*>(mem_->at(new_back))->valid()) {
                 return {nullptr};
             }
             /*        back_

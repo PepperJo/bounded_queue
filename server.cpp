@@ -2,6 +2,7 @@
 #include <sstream>
 #include <cstdlib>
 #include <thread>
+#include <memory>
 
 #include <boost/program_options.hpp>
 
@@ -93,20 +94,20 @@ int main(int argc, char* argv[]) {
                   << psl::terminal::graphic_format::RESET << '\n';
         nclients++;
 
-        bounded_queue::Memory mem{size.value};
+        auto mem = std::make_shared<bounded_queue::Memory>(size.value);
         if (vm.count("h")) {
 #ifdef MADV_HUGEPAGE
-            LOG_ERR_EXIT(madvise(mem.get(), mem.raw_size(), MADV_HUGEPAGE),
+            LOG_ERR_EXIT(madvise(mem->raw(), mem->raw_size(), MADV_HUGEPAGE),
                     errno, std::system_category());
 #else
             LOG_ERR_EXIT("no hugepage support!", EINVAL,
                     std::system_category());
 #endif
         }
-        memset(mem.get(), 0, mem.size());
+        memset(mem->raw(), 0, mem->size());
         ibv_mr* mr;
-        LOG_ERR_EXIT(!(mr = ibv_reg_mr(child_id->pd, mem.get(),
-                                        mem.raw_size(),
+        LOG_ERR_EXIT(!(mr = ibv_reg_mr(child_id->pd, mem->raw(),
+                                        mem->raw_size(),
                                        IBV_ACCESS_LOCAL_WRITE |
                                            IBV_ACCESS_REMOTE_WRITE |
                                            IBV_ACCESS_REMOTE_READ |
@@ -137,15 +138,13 @@ int main(int argc, char* argv[]) {
                      errno, std::system_category());
 
         ClientConnectionData client_data;
-        std::cout << "-->" << (uint32_t)child_id->event->param.conn.private_data_len << '\n';
-        // std::cout << id->event->param.conn.private_data_len << '\n';
         LOG_ERR_EXIT(child_id->event->param.conn.private_data_len <
                 sizeof(client_data), EINVAL, std::system_category());
         client_data = *reinterpret_cast<const ClientConnectionData*>(child_id->event->param.conn.private_data);
 
         ServerConnectionData conn_data;
-        conn_data.address = reinterpret_cast<uint64_t>(mem.get());
-        conn_data.size = mem.size();
+        conn_data.address = reinterpret_cast<uint64_t>(mem->raw());
+        conn_data.size = mem->size();
         conn_data.rkey = mr->rkey;
         rdma_conn_param conn_param = {};
         conn_param.private_data = reinterpret_cast<void*>(&conn_data);
@@ -155,7 +154,7 @@ int main(int argc, char* argv[]) {
         LOG_ERR_EXIT(rdma_accept(child_id, &conn_param), errno,
                      std::system_category());
 
-        std::thread{[mem = std::move(mem), &child_id, &cq, &client_data]() {
+        std::thread{[mem, &child_id, &cq, &client_data]() {
             bounded_queue::Consumer<Sep> c{mem};
             uint64_t old_back = c.back();
             ibv_send_wr wr = {};
@@ -164,6 +163,7 @@ int main(int argc, char* argv[]) {
             sge.addr = reinterpret_cast<uint64_t>(&old_back);
             sge.length = sizeof(old_back);
             wr.num_sge = 1;
+            wr.sg_list = &sge;
             wr.wr.rdma.remote_addr = client_data.address;
             wr.wr.rdma.rkey = client_data.rkey;
             wr.opcode = IBV_WR_RDMA_WRITE;
@@ -174,7 +174,7 @@ int main(int argc, char* argv[]) {
             ibv_wc wc[batch];
             while (true) {
                 c.consume();
-                if (c.back() - old_back > mem.size()/2) {
+                if (c.back() - old_back > mem->size()/2) {
                     old_back = c.back();
                     ibv_send_wr* bad_wr;
                     LOG_ERR_EXIT(ibv_post_send(child_id->qp, &wr, &bad_wr),

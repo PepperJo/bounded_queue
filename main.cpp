@@ -26,8 +26,8 @@ struct Sep {
 
 int main() {
     using namespace bounded_queue;
-    Memory mem{128};
-    std::cout << mem.size() << '\n';
+    auto mem = std::make_shared<Memory>(128);
+    std::cout << mem->size() << '\n';
     Producer<Sep> p{mem};
 
     size_t n = 1025;

@@ -149,15 +149,15 @@ int main(int argc, char* argv[]) {
         *reinterpret_cast<const ServerConnectionData*>(
             id->event->param.conn.private_data);
 
-    bounded_queue::Memory mem{server_conn_data.size};
+    auto mem = std::make_shared<bounded_queue::Memory>(server_conn_data.size);
     if (vm.count("h")) {
-        LOG_ERR_EXIT(madvise(mem.get(), mem.raw_size(), MADV_HUGEPAGE), errno,
+        LOG_ERR_EXIT(madvise(mem->raw(), mem->raw_size(), MADV_HUGEPAGE), errno,
                 std::system_category());
     }
 
     ibv_mr* mr;
     LOG_ERR_EXIT(!(mr = ibv_reg_mr(
-                       id->pd, mem.get(), mem.raw_size(),
+                       id->pd, mem->raw(), mem->raw_size(),
                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                            IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC)),
                  errno, std::system_category());
@@ -249,12 +249,13 @@ int main(int argc, char* argv[]) {
             if (!e) {
                 continue;
             }
+            // std::cout << e.get() << '\n';
             /* local location */
             sge.addr = reinterpret_cast<uint64_t>(e.get());
             sge.length = e.raw_size();
             /* remote location */
             wr.wr.rdma.remote_addr = server_conn_data.address +
-                (uint64_t)((char*)(e.get()) - (char*)mem.get());
+                (uint64_t)((char*)(e.get()) - (char*)mem->raw());
             if (posted % cq_mod == 0) {
                 wr.send_flags |= IBV_SEND_SIGNALED;
             } else {

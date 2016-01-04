@@ -20,43 +20,6 @@ struct DeviceContext {
     ibv_device_attr dev_attr;
 };
 
-struct Bytes {
-    size_t value;
-};
-
-inline std::ostream& operator<<(std::ostream& out, const Bytes& size) {
-    out << size.value;
-    return out;
-}
-
-inline std::istream& operator>>(std::istream& in, Bytes& size) {
-    std::string str;
-    in >> str;
-    std::stringstream ss(str);
-    ss >> size.value;
-    char x = '\0';
-    ss >> x;
-    size_t order = 0;
-    switch (x) {
-    case 'G':
-        order++;
-    case 'M':
-        order++;
-    case 'K':
-        order++;
-        break;
-    case '\0':
-        break;
-    default:
-        in.setstate(std::ios_base::failbit);
-        break;
-    }
-    while (order-- > 0) {
-        size.value *= static_cast<size_t>(1024);
-    }
-    return in;
-}
-
 int main(int argc, char* argv[]) {
     namespace bop = boost::program_options;
 
@@ -67,7 +30,7 @@ int main(int argc, char* argv[]) {
         ("s", bop::value<Bytes>()->required(), "size (K/M/G)")
         ("ip", bop::value<psl::net::in_addr>()->default_value({}),
         "listen only from this ip")
-        ("p", bop::value<psl::net::in_port_t>()->default_value(20123),
+        ("p", bop::value<psl::net::in_port_t>()->default_value(default_port),
         "listen on port")
         ("h", "enbale hugepages (madvise)");
     // clang-format on
@@ -167,11 +130,18 @@ int main(int argc, char* argv[]) {
         qp_init_attr.recv_cq = cq;
         qp_init_attr.cap.max_inline_data = 0;
         qp_init_attr.cap.max_recv_wr = 1;
-        qp_init_attr.cap.max_send_wr = 1;
+        qp_init_attr.cap.max_send_wr = 16;
         qp_init_attr.cap.max_recv_sge = 1;
         qp_init_attr.cap.max_send_sge = 1;
         LOG_ERR_EXIT(rdma_create_qp(child_id, child_id->pd, &qp_init_attr),
                      errno, std::system_category());
+
+        ClientConnectionData client_data;
+        std::cout << "-->" << (uint32_t)child_id->event->param.conn.private_data_len << '\n';
+        // std::cout << id->event->param.conn.private_data_len << '\n';
+        LOG_ERR_EXIT(child_id->event->param.conn.private_data_len <
+                sizeof(client_data), EINVAL, std::system_category());
+        client_data = *reinterpret_cast<const ClientConnectionData*>(child_id->event->param.conn.private_data);
 
         ServerConnectionData conn_data;
         conn_data.address = reinterpret_cast<uint64_t>(mem.get());
@@ -185,10 +155,6 @@ int main(int argc, char* argv[]) {
         LOG_ERR_EXIT(rdma_accept(child_id, &conn_param), errno,
                      std::system_category());
 
-        ClientConnectionData client_data;
-        LOG_ERR_EXIT(child_id->event->param.conn.private_data_len <
-                sizeof(client_data), EINVAL, std::system_category());
-        client_data = *reinterpret_cast<const ClientConnectionData*>(child_id->event->param.conn.private_data);
         std::thread{[mem = std::move(mem), &child_id, &cq, &client_data]() {
             bounded_queue::Consumer<Sep> c{mem};
             uint64_t old_back = c.back();

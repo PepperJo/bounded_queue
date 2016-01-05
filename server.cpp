@@ -98,21 +98,20 @@ int main(int argc, char* argv[]) {
         if (vm.count("h")) {
 #ifdef MADV_HUGEPAGE
             LOG_ERR_EXIT(madvise(mem->raw(), mem->raw_size(), MADV_HUGEPAGE),
-                    errno, std::system_category());
+                         errno, std::system_category());
 #else
             LOG_ERR_EXIT("no hugepage support!", EINVAL,
-                    std::system_category());
+                         std::system_category());
 #endif
         }
         memset(mem->raw(), 0, mem->size());
         ibv_mr* mr;
-        LOG_ERR_EXIT(!(mr = ibv_reg_mr(child_id->pd, mem->raw(),
-                                        mem->raw_size(),
-                                       IBV_ACCESS_LOCAL_WRITE |
-                                           IBV_ACCESS_REMOTE_WRITE |
-                                           IBV_ACCESS_REMOTE_READ |
-                                           IBV_ACCESS_REMOTE_ATOMIC)),
-                     errno, std::system_category());
+        LOG_ERR_EXIT(
+            !(mr = ibv_reg_mr(child_id->pd, mem->raw(), mem->raw_size(),
+                              IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
+                                  IBV_ACCESS_REMOTE_READ |
+                                  IBV_ACCESS_REMOTE_ATOMIC)),
+            errno, std::system_category());
 
         ibv_device_attr dev_attr;
         LOG_ERR_EXIT(ibv_query_device(child_id->verbs, &dev_attr), errno,
@@ -120,8 +119,7 @@ int main(int argc, char* argv[]) {
 
         ibv_cq* cq;
         LOG_ERR_EXIT(
-            !(cq = ibv_create_cq(child_id->verbs, 16,
-                                 nullptr, nullptr, 0)),
+            !(cq = ibv_create_cq(child_id->verbs, 16, nullptr, nullptr, 0)),
             errno, std::system_category());
 
         ibv_qp_init_attr qp_init_attr = {};
@@ -139,8 +137,10 @@ int main(int argc, char* argv[]) {
 
         ClientConnectionData client_data;
         LOG_ERR_EXIT(child_id->event->param.conn.private_data_len <
-                sizeof(client_data), EINVAL, std::system_category());
-        client_data = *reinterpret_cast<const ClientConnectionData*>(child_id->event->param.conn.private_data);
+                         sizeof(client_data),
+                     EINVAL, std::system_category());
+        client_data = *reinterpret_cast<const ClientConnectionData*>(
+                          child_id->event->param.conn.private_data);
 
         ServerConnectionData conn_data;
         conn_data.address = reinterpret_cast<uint64_t>(mem->raw());
@@ -154,7 +154,7 @@ int main(int argc, char* argv[]) {
         LOG_ERR_EXIT(rdma_accept(child_id, &conn_param), errno,
                      std::system_category());
 
-        std::thread{[mem, &child_id, &cq, &client_data]() {
+        std::thread{[=]() {
             bounded_queue::Consumer<Sep> c{mem};
             uint64_t old_back = c.back();
             ibv_send_wr wr = {};
@@ -168,27 +168,27 @@ int main(int argc, char* argv[]) {
             wr.wr.rdma.rkey = client_data.rkey;
             wr.opcode = IBV_WR_RDMA_WRITE;
             wr.send_flags = IBV_SEND_INLINE | IBV_SEND_SIGNALED;
+            wr.next = nullptr;
 
             size_t i = 0;
             constexpr size_t batch = 8;
             ibv_wc wc[batch];
             while (true) {
                 c.consume();
-                if (c.back() - old_back > mem->size()/2) {
+                if (c.back() - old_back > mem->size() / 2) {
                     old_back = c.back();
                     ibv_send_wr* bad_wr;
                     LOG_ERR_EXIT(ibv_post_send(child_id->qp, &wr, &bad_wr),
-                            errno, std::system_category());
+                                 errno, std::system_category());
                 }
                 if (i++ % batch == 0) {
                     int num_wc;
                     LOG_ERR_EXIT((num_wc = ibv_poll_cq(cq, batch, wc)) < 0,
-                            errno, std::system_category());
+                                 errno, std::system_category());
                     i -= num_wc;
                 }
             }
-        }
-        }.detach();
+        }}.detach();
     }
 
     return 0;

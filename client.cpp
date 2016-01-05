@@ -124,7 +124,7 @@ int main(int argc, char* argv[]) {
     LOG_ERR_EXIT(ibv_query_device(id->verbs, &dev_attr), errno,
                  std::system_category());
 
-    volatile uint64_t back;
+    volatile uint64_t back{0};
     ibv_mr* back_mr;
     LOG_ERR_EXIT(!(back_mr = ibv_reg_mr(
                        id->pd, (void*)(&back), sizeof(back),
@@ -154,6 +154,7 @@ int main(int argc, char* argv[]) {
         LOG_ERR_EXIT(madvise(mem->raw(), mem->raw_size(), MADV_HUGEPAGE), errno,
                 std::system_category());
     }
+    memset(mem->raw(), 0, mem->size());
 
     ibv_mr* mr;
     LOG_ERR_EXIT(!(mr = ibv_reg_mr(
@@ -233,6 +234,7 @@ int main(int argc, char* argv[]) {
     wr.opcode = IBV_WR_RDMA_WRITE;
     wr.send_flags = inline_data ? IBV_SEND_INLINE : 0;
     wr.wr.rdma.rkey = server_conn_data.rkey;
+    wr.next = nullptr;
 
     size_t cq_mod = vm["cq_mod"].as<size_t>();
     size_t in_flight = 0;

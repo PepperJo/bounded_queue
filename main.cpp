@@ -5,30 +5,11 @@
 
 #include <bounded_queue.h>
 
-struct Sep {
-    uint32_t size : 31;
-    uint32_t is_footer : 1;
-
-    void header(size_t s) volatile {
-        is_footer = 0;
-        size = static_cast<decltype(size)>(s);
-        assert (size == s);
-    }
-    void footer() volatile {
-        size = 0;
-        is_footer = 1;
-    }
-
-    bool valid() volatile {
-        return (!is_footer && size != 0) || (is_footer && size == 0);
-    }
-};
-
 int main() {
     using namespace bounded_queue;
-    auto mem = std::make_shared<Memory>(128);
+    auto mem = std::make_shared<Memory>(4096*10);
     std::cout << mem->size() << '\n';
-    Producer<Sep> p{mem};
+    Producer<Sep<uint32_t>> p{mem};
 
     size_t n = 1025;
     volatile Index back = 0;
@@ -41,7 +22,7 @@ int main() {
     }
 
     Index old_back = back;
-    Consumer<Sep> c{mem};
+    Consumer<Sep<uint32_t>> c{mem};
     for (size_t i = 0; i < n; i++) {
         auto e = c.consume();
         if (e) {

@@ -14,6 +14,8 @@
 #include <common.h>
 #include <bounded_queue.h>
 
+using Consumer = bounded_queue::Consumer<bounded_queue::Sep<uint32_t>>;
+
 constexpr int connection_backlog = 128;
 
 struct DeviceContext {
@@ -155,7 +157,7 @@ int main(int argc, char* argv[]) {
                      std::system_category());
 
         std::thread{[=]() {
-            bounded_queue::Consumer<Sep> c{mem};
+            Consumer c{mem};
             uint64_t old_back = c.back();
             ibv_send_wr wr = {};
             wr.next = NULL;

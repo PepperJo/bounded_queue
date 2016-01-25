@@ -24,6 +24,8 @@
 #include <bounded_queue.h>
 #include <common.h>
 
+using Producer = bounded_queue::Producer<bounded_queue::Sep<uint32_t>>;
+
 constexpr size_t sample_size = 1e6;
 
 enum class Type { LAT, BW };
@@ -152,7 +154,7 @@ int main(int argc, char* argv[]) {
     auto mem = std::make_shared<bounded_queue::Memory>(server_conn_data.size);
     if (vm.count("h")) {
         LOG_ERR_EXIT(madvise(mem->raw(), mem->raw_size(), MADV_HUGEPAGE), errno,
-                std::system_category());
+                     std::system_category());
     }
     memset(mem->raw(), 0, mem->size());
 
@@ -223,7 +225,7 @@ int main(int argc, char* argv[]) {
         done = true;
     });
 
-    bounded_queue::Producer<Sep> prod{mem};
+    Producer prod{mem};
 
     ibv_send_wr wr;
     wr.wr_id = 0;
@@ -256,8 +258,8 @@ int main(int argc, char* argv[]) {
             sge.addr = reinterpret_cast<uint64_t>(e.get());
             sge.length = e.raw_size();
             /* remote location */
-            wr.wr.rdma.remote_addr = server_conn_data.address +
-                (uint64_t)((char*)(e.get()) - (char*)mem->raw());
+            wr.wr.rdma.remote_addr =
+                server_conn_data.address + (e.idx() % mem->size());
             if (posted % cq_mod == 0) {
                 wr.send_flags |= IBV_SEND_SIGNALED;
             } else {
